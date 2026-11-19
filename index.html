@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>AgentCheckIn — Daily Check-In 每日打卡</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+    <style>
+      :root {
+        --bg: #f5f5f2;
+        --surface: #ffffff;
+        --surface-2: #f0f0ec;
+        --ink: #17191d;
+        --muted: #5d6167;
+        --line: #e0e0d9;
+        --accent: #f0b90b;
+        --accent-ink: #191204;
+        --ok: #0a7d2c;
+        --ok-bg: #e9f7ee;
+        --bad: #b00020;
+        --bad-bg: #fdeeee;
+        --warn-bg: #fff6da;
+        --warn-line: #ecd27a;
+        --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #101114;
+          --surface: #1a1b1f;
+          --surface-2: #232429;
+          --ink: #f2f2ee;
+          --muted: #a6aab2;
+          --line: #2d2f35;
+          --ok: #4cc36e;
+          --ok-bg: #14301d;
+          --bad: #ff7a8a;
+          --bad-bg: #3a1a20;
+          --warn-bg: #33300f;
+          --warn-line: #6b611f;
+        }
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        line-height: 1.65;
+        font-size: 16px;
+      }
+      main { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; }
+      h1 { font-size: 26px; line-height: 1.3; margin: 6px 0 8px; letter-spacing: 0; }
+      h2 { font-size: 18px; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      p { margin: 8px 0; }
+      .lede { color: var(--muted); font-size: 16px; margin-top: 0; }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 18px;
+        margin: 16px 0;
+      }
+      .step-num {
+        flex: 0 0 auto;
+        width: 28px; height: 28px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--accent-ink);
+        font-size: 15px; font-weight: 800;
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin: 16px 0 4px;
+      }
+      @media (min-width: 640px) { .facts { grid-template-columns: repeat(3, 1fr); } }
+      .fact {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .fact .k { font-size: 12.5px; color: var(--muted); }
+      .fact .v { font-size: 15px; font-weight: 700; margin-top: 2px; }
+      button, [role="button"], select, summary, input:not([type="checkbox"], [type="radio"]) { min-height: 2rem; }
+      .btn {
+        display: block;
+        width: 100%;
+        min-height: 52px;
+        padding: 13px 18px;
+        margin: 12px 0 4px;
+        font-size: 17px;
+        font-weight: 700;
+        border: 0;
+        border-radius: 10px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .btn:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
+      code, .mono { font-family: var(--mono); font-size: 13.5px; word-break: break-all; }
+      .check { list-style: none; margin: 10px 0; padding: 0; font-size: 15px; }
+      .check li { padding: 5px 0 5px 30px; position: relative; }
+      .check li::before { position: absolute; left: 2px; top: 5px; font-weight: 800; }
+      .check li.wait::before { content: "·"; color: var(--muted); }
+      .check li.ok::before { content: "✓"; color: var(--ok); }
+      .check li.bad::before { content: "✗"; color: var(--bad); }
+      .check .sub { color: var(--muted); font-size: 13.5px; display: block; }
+      .notice { border-radius: 10px; padding: 12px 14px; font-size: 14.5px; margin: 12px 0; }
+      .notice.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); }
+      .notice.ok { background: var(--ok-bg); border: 1px solid var(--ok); }
+      .notice.bad { background: var(--bad-bg); border: 1px solid var(--bad); }
+      .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 6px; text-align: center; }
+      .stat .n { font-size: 30px; font-weight: 800; line-height: 1.15; }
+      .stat .t { font-size: 13px; color: var(--muted); }
+      .progress { height: 12px; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin: 10px 0 4px; border: 1px solid var(--line); }
+      .progress > div { height: 100%; background: var(--accent); width: 0%; transition: width .4s ease; }
+      table.board { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      table.board th, table.board td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+      table.board th.num, table.board td.num { text-align: right; }
+      table.board tr:last-child td { border-bottom: 0; }
+      .fine { color: var(--muted); font-size: 13.5px; }
+      .zh { display: block; color: var(--muted); font-size: 0.92em; font-weight: 400; margin-top: 2px; }
+      .zh-inline { color: var(--muted); font-size: 0.88em; }
+      details { margin-top: 12px; }
+      summary { cursor: pointer; font-weight: 600; padding: 8px 0; min-height: 36px; }
+      pre {
+        background: var(--surface-2); border-radius: 10px; padding: 12px;
+        font-family: var(--mono); font-size: 12px; line-height: 1.55;
+        overflow-x: auto; white-space: pre;
+      }
+      a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+      .hidden { display: none !important; }
+      ul.tight { margin: 8px 0; padding-left: 20px; }
+      ul.tight li { margin: 4px 0; }
+      @media (prefers-reduced-motion: reduce) { .progress > div { transition: none; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>AgentCheckIn Daily Check-In <span class="zh-inline">每日打卡</span></h1>
+      <p class="lede">A daily check-in for holders of a Binance Agent ID (<code>.ai</code>). The contract is live on BSC mainnet: check in once a day, and your streak and total check-ins are recorded on-chain.<span class="zh">给币安 Agent ID（<code>.ai</code>）持有人的每日签到。合约已经部署在 BSC 主网上，每天来打一次卡，连签天数和累计次数都记在链上。</span></p>
+
+      <div class="facts">
+        <div class="fact"><div class="k">Network 网络</div><div class="v">BSC Mainnet<span class="zh">BSC 主网</span></div></div>
+        <div class="fact"><div class="k">Check-in cost 打卡费用</div><div class="v">Gas only, a few cents<span class="zh">只付 gas，几分钱</span></div></div>
+        <div class="fact"><div class="k">Day rolls over 换日时间</div><div class="v">00:00 UTC<span class="zh">每天 UTC 0 点</span></div></div>
+      </div>
+      <p class="fine">The entry window closes at <strong>16:00 on Dec 9</strong>. Contract: <a href="https://bscscan.com/address/0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36" target="_blank" rel="noopener"><code>0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36</code></a> (tap to view on BscScan).<span class="zh">比赛窗口到 <strong>12 月 9 日 16:00</strong> 截止。合约见上方链接（点开在 BscScan 上查看）。</span></p>
+
+      <div class="notice warn" id="open-tip">
+        <strong>How to open:</strong> Checking in needs a wallet signature, so open this page in the <strong>Binance App's built-in browser</strong> and switch to the wallet that holds your Agent ID. Opened in a regular browser or on a desktop there is no wallet — you can still view the checker count and the leaderboard, but you can't check in.<span class="zh"><strong>打开方式：</strong>打卡要用钱包签名，请在<strong>币安 App 的内置浏览器</strong>里打开本页，并切到持有 Agent ID 的钱包。在普通浏览器或电脑上打开没有钱包，只能看人数和排行榜，点不了打卡。</span>
+      </div>
+      <div class="notice bad hidden" id="no-lib">A page component failed to load (network problem) — check your connection and refresh this page. 页面组件没加载成功（网络问题），请检查网络后刷新本页再试。</div>
+
+      <section class="card" aria-labelledby="s1">
+        <h2 id="s1"><span class="step-num">1</span>Connect your wallet <span class="zh-inline">连接钱包</span></h2>
+        <p>Tap the button below and confirm the connection in the Binance App. The page then checks three things automatically: your wallet address, whether this wallet holds an Agent ID, and whether the network is BSC Mainnet.<span class="zh">点下面的按钮，在币安 App 里确认连接。页面会自动检查：钱包地址、这个钱包有没有 Agent ID、网络是不是 BSC 主网。</span></p>
+        <button class="btn" id="connect-btn">Connect Wallet 连接钱包</button>
+        <ul class="check">
+          <li id="ck-wallet" class="wait">Wallet address 钱包地址<span class="sub">Not connected 未连接</span></li>
+          <li id="ck-holder" class="wait">Agent ID<span class="sub">Only addresses holding an Agent ID (.ai name) can check in 只有持有 Agent ID（.ai 名字）的地址能打卡</span></li>
+          <li id="ck-chain" class="wait">Network 网络<span class="sub">BSC Mainnet (chainId 56) required — switched for you automatically if needed 需要 BSC 主网（chainId 56），不对会自动帮你切</span></li>
+        </ul>
+      </section>
+
+      <section class="card" aria-labelledby="s2">
+        <h2 id="s2"><span class="step-num">2</span>Daily check-in <span class="zh-inline">每日打卡</span></h2>
+        <div class="stats">
+          <div class="stat"><div class="n" id="my-streak">–</div><div class="t">My streak (days) 我的连签（天）</div></div>
+          <div class="stat"><div class="n" id="my-total">–</div><div class="t">My total check-ins 我的累计打卡</div></div>
+          <div class="stat"><div class="n" id="total-checkers">–</div><div class="t">Total checkers 已打卡人数</div></div>
+        </div>
+        <button class="btn" id="checkin-btn" disabled>Connect a wallet first 先连接钱包才能打卡</button>
+        <p class="fine" id="checkin-note">No wallet connected yet. Once connected, this shows whether you can check in today. 还没连接钱包。连接后这里会显示你今天能不能打卡。</p>
+        <p class="fine" id="tx-line"></p>
+      </section>
+
+      <section class="card" aria-labelledby="s3">
+        <h2 id="s3"><span class="step-num">3</span>Leaderboard <span class="zh-inline">排行榜</span></h2>
+        <p class="fine" style="margin-top:0">Ranked by streak, then by total check-ins. A holder's <code>.ai</code> name is shown when it can be resolved; otherwise the address is shown — names are never made up.<span class="zh">按连签天数排，再按累计次数排。持有人的 <code>.ai</code> 名字能解析出来就显示名字，解析不到就显示地址，不会瞎编。</span></p>
+        <table class="board">
+          <thead><tr><th>#</th><th>Address / Name 地址 / 名字</th><th class="num">Streak 连签</th><th class="num">Total 累计</th></tr></thead>
+          <tbody id="board"><tr><td colspan="4">Loading… 加载中…</td></tr></tbody>
+        </table>
+      </section>
+
+      <section class="card" aria-labelledby="s4">
+        <h2 id="s4">About the contract &amp; risks <span class="zh-inline">合约说明与风险</span></h2>
+        <ul class="tight">
+          <li><strong>What it does:</strong> <code>checkIn()</code> can be called once per day. Check in the day after your last check-in and your streak grows by 1; miss a day and it restarts at 1. Every check-in emits an on-chain event, and the leaderboard is computed from those events.<span class="zh"><strong>它做什么：</strong><code>checkIn()</code> 每天只能调一次；昨天打过卡，连签 +1，断一天就从 1 重新算。每次打卡都发一条链上事件，排行榜就是读这些事件算出来的。</span></li>
+          <li><strong>The gate:</strong> Only addresses holding an Agent ID can check in. The contract checks <code>balanceOf</code> on the official registry <code>0x60b9262456de011f7d15a54cdd8c48baaa8b022f</code>.<span class="zh"><strong>门禁：</strong>只有持有 Agent ID 的地址能打卡，合约查官方注册表 <code>0x60b9262456de011f7d15a54cdd8c48baaa8b022f</code> 的 <code>balanceOf</code>。</span></li>
+          <li><strong>What it doesn't do:</strong> It takes no money, custodies no assets, has no token, and checking in promises no returns or airdrops. There is no admin backdoor: no owner, it can't be paused, it can't be upgraded — nobody can change the rules after deployment.<span class="zh"><strong>它不做什么：</strong>不收钱、不托管任何资产、没有代币、打卡不承诺任何收益或空投。合约里没有管理员后门，没有 owner、不能暂停、不能升级，部署后谁也改不了规则。</span></li>
+          <li><strong>Cost:</strong> You pay the gas from your own wallet — about 0.00005–0.00014 BNB per check-in (a few cents).<span class="zh"><strong>费用：</strong>每次打卡的 gas 由你自己的钱包付，一次约 0.00005–0.00014 BNB（几分钱）。</span></li>
+          <li><strong>Public record:</strong> Check-in records are fully public on-chain; anyone can see how many days an address has checked in.<span class="zh"><strong>公开性：</strong>打卡记录全在链上公开，任何人都能看到某个地址打了多少天卡。</span></li>
+          <li><strong>Contract:</strong> <a href="https://bscscan.com/address/0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36" target="_blank" rel="noopener">0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36</a> (BSC Mainnet, deployed at block 134570129) · <a href="https://bscscan.com/tx/0xe804bab2b4edefeda2fecc1528a8e6bc6a33eb30ff8e723890536d72813a2c9a" target="_blank" rel="noopener">Deployment transaction</a><span class="zh"><strong>合约：</strong>地址见上方链接（BSC 主网，部署于区块 134570129）· 部署交易见上方链接。</span></li>
+        </ul>
+        <details>
+          <summary>View the contract source 查看合约源码</summary>
+          <pre id="source-code">// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+interface IAgentIdRegistry {
+    function balanceOf(address account) external view returns (uint256);
+}
+
+contract AgentCheckIn {
+    IAgentIdRegistry public immutable agentIdRegistry;
+
+    mapping(address =&gt; uint256) public lastCheckInDay;
+    mapping(address =&gt; uint256) public streak;
+    mapping(address =&gt; uint256) public totalCheckIns;
+    mapping(address =&gt; bool) public hasCheckedIn;
+    uint256 public totalCheckers;
+
+    event CheckIn(address indexed user, uint256 indexed day, uint256 streak);
+
+    constructor(address _agentIdRegistry) {
+        require(_agentIdRegistry != address(0), "registry is zero address");
+        agentIdRegistry = IAgentIdRegistry(_agentIdRegistry);
+    }
+
+    function currentDay() public view returns (uint256) {
+        return block.timestamp / 1 days;
+    }
+
+    function checkIn() external {
+        require(
+            agentIdRegistry.balanceOf(msg.sender) &gt; 0,
+            "AgentCheckIn: caller holds no Agent ID"
+        );
+        uint256 today = currentDay();
+        require(
+            lastCheckInDay[msg.sender] != today,
+            "AgentCheckIn: already checked in today"
+        );
+
+        if (lastCheckInDay[msg.sender] == today - 1) {
+            streak[msg.sender] += 1;
+        } else {
+            streak[msg.sender] = 1;
+        }
+        lastCheckInDay[msg.sender] = today;
+        totalCheckIns[msg.sender] += 1;
+
+        if (!hasCheckedIn[msg.sender]) {
+            hasCheckedIn[msg.sender] = true;
+            totalCheckers += 1;
+        }
+
+        emit CheckIn(msg.sender, today, streak[msg.sender]);
+    }
+
+    function getUser(address user)
+        external
+        view
+        returns (uint256 _lastCheckInDay, uint256 _streak, uint256 _totalCheckIns)
+    {
+        return (lastCheckInDay[user], streak[user], totalCheckIns[user]);
+    }
+}</pre>
+          <p class="fine">Compiler v0.8.20, optimizer enabled at 200 runs; the constructor argument is the registry address. 编译器 v0.8.20、优化开启 200 次，构造参数为注册表地址。</p>
+        </details>
+        <details>
+          <summary>Troubleshooting 出问题了怎么办</summary>
+          <ul class="tight">
+            <li><strong>Tapping Connect does nothing:</strong> Most likely the page isn't open in the Binance App's built-in browser. Paste this page's link into the browser inside the Binance App and try again.<span class="zh"><strong>点连接没反应：</strong>多半是没在币安 App 内置浏览器里打开。把本页链接粘到币安 App 的浏览器里再试。</span></li>
+            <li><strong>It says you have no Agent ID:</strong> This wallet never claimed an Agent ID (.ai name). Switch to a wallet that claimed one, or claim one in the Binance App first.<span class="zh"><strong>打卡提示没有 Agent ID：</strong>这个钱包没领过 Agent ID（.ai 名字），换成领过的钱包，或者先在币安 App 里领一个。</span></li>
+            <li><strong>Already checked in today:</strong> That's normal — come back tomorrow. The day rolls over at 00:00 UTC, which is 8:00 AM Beijing time.<span class="zh"><strong>今天已经打过卡：</strong>正常，明天再来。换日时间是 UTC 0 点，也就是北京时间早上 8 点。</span></li>
+            <li><strong>The check-in transaction failed:</strong> If it never landed on-chain, it costs nothing. Read the failure reason, fix it, and tap check-in again.<span class="zh"><strong>打卡交易失败：</strong>没上链就不花钱，看一眼失败原因，处理好后重新点打卡即可。</span></li>
+          </ul>
+        </details>
+      </section>
+
+      <p class="fine">This page collects and uploads nothing: connecting and checking in go straight from your wallet to the BSC chain, and the checker count and leaderboard are computed by reading public on-chain data.<span class="zh">本页不收集、不上传任何信息：连接、打卡都由你的钱包直接和 BSC 链交互，人数和排行榜是直接读链上公开数据算出来的。</span></p>
+    </main>
+    <script>
+      "use strict";
+      var CONTRACT = "0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36";
+      var DEPLOY_BLOCK = 134570129;
+      var REGISTRY = "0x60b9262456de011f7d15a54cdd8c48baaa8b022f";
+      var BSC_RPC = "https://bsc-dataseed.binance.org/";
+      var ABI = [
+        "event CheckIn(address indexed user, uint256 indexed day, uint256 streak)",
+        "function checkIn()",
+        "function getUser(address user) view returns (uint256 lastCheckInDay, uint256 streak, uint256 totalCheckIns)",
+        "function totalCheckers() view returns (uint256)",
+        "function currentDay() view returns (uint256)",
+        "function agentIdRegistry() view returns (address)"
+      ];
+      var REGISTRY_ABI = ["function balanceOf(address account) view returns (uint256)"];
+
+      var $ = function (id) { return document.getElementById(id); };
+      var provider = null, signer = null, account = null;
+      var readProvider = null, readContract = null;
+      var isHolder = false, checkedToday = false, myLoaded = false;
+
+      function short(a) { return a ? a.slice(0, 6) + "…" + a.slice(-4) : ""; }
+      function errText(e) {
+        if (!e) return "未知错误";
+        var m = e.shortMessage || e.reason || e.message || String(e);
+        return String(m).slice(0, 220);
+      }
+      function setCheck(id, state, sub) {
+        var li = $(id);
+        li.className = state;
+        var s = li.querySelector(".sub");
+        if (s && sub != null) s.textContent = sub;
+      }
+
+      function getInjected() {
+        if (window.ethereum) return window.ethereum;
+        if (window.BinanceChain && window.BinanceChain.ethereum) return window.BinanceChain.ethereum;
+        if (window.BinanceChain) return window.BinanceChain;
+        return null;
+      }
+
+      function getReadContract() {
+        if (typeof ethers === "undefined") return null;
+        if (!readProvider) readProvider = new ethers.JsonRpcProvider(BSC_RPC);
+        if (!readContract) readContract = new ethers.Contract(CONTRACT, ABI, readProvider);
+        return readContract;
+      }
+
+      async function connect() {
+        if (typeof ethers === "undefined") { $("no-lib").classList.remove("hidden"); return; }
+        var injected = getInjected();
+        if (!injected) {
+          setCheck("ck-wallet", "bad", "No wallet detected. Open this page in the Binance App's built-in browser — not a regular browser or a desktop. 没检测到钱包。请在币安 App 的内置浏览器里打开本页，不要用普通浏览器或电脑打开。");
+          return;
+        }
+        try {
+          provider = new ethers.BrowserProvider(injected);
+          await provider.send("eth_requestAccounts", []);
+          var net = await provider.getNetwork();
+          if (Number(net.chainId) !== 56) {
+            try {
+              await injected.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x38" }] });
+            } catch (swErr) {
+              if (swErr && swErr.code === 4902) {
+                await injected.request({
+                  method: "wallet_addEthereumChain",
+                  params: [{ chainId: "0x38", chainName: "BNB Smart Chain", nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 }, rpcUrls: [BSC_RPC], blockExplorerUrls: ["https://bscscan.com"] }]
+                });
+              } else { throw swErr; }
+            }
+            provider = new ethers.BrowserProvider(injected);
+          }
+          signer = await provider.getSigner();
+          account = await signer.getAddress();
+          setCheck("ck-wallet", "ok", account);
+          $("connect-btn").textContent = "Connected — tap to refresh 已连接（点此刷新状态）";
+          await refreshWalletChecks();
+          await refreshMyState();
+        } catch (e) {
+          setCheck("ck-wallet", "bad", "Connection failed 连接失败: " + errText(e));
+        }
+      }
+
+      async function refreshWalletChecks() {
+        if (!provider || !account) return;
+        try {
+          var net = await provider.getNetwork();
+          if (Number(net.chainId) === 56) setCheck("ck-chain", "ok", "On BSC Mainnet ✓ 已在 BSC 主网 ✓");
+          else setCheck("ck-chain", "bad", "Current chainId " + net.chainId + " is not BSC Mainnet 当前 chainId " + net.chainId + "，不是 BSC 主网");
+        } catch (e) { setCheck("ck-chain", "bad", "Couldn't read the network 读不到网络: " + errText(e)); }
+        try {
+          var c = getReadContract();
+          if (!c) return;
+          var reg = new ethers.Contract(REGISTRY, REGISTRY_ABI, readProvider);
+          var bal = await reg.balanceOf(account);
+          isHolder = bal > 0n;
+          setCheck("ck-holder", isHolder ? "ok" : "bad",
+            isHolder ? "This wallet holds an Agent ID ✓ — you can check in 这个钱包持有 Agent ID ✓，可以打卡" : "This wallet holds no Agent ID, so it can't check in. Switch to a wallet that claimed one, or claim one in the Binance App first. 这个钱包没有 Agent ID，不能打卡。换成领过的钱包，或者先在币安 App 里领一个。");
+        } catch (e) { setCheck("ck-holder", "bad", "Couldn't read Agent ID status 读不到 Agent ID: " + errText(e)); }
+      }
+
+      async function refreshPublic() {
+        var c = getReadContract();
+        if (!c) return;
+        try {
+          var total = Number(await c.totalCheckers());
+          $("total-checkers").textContent = total;
+          refreshBoard(total);
+        } catch (e) {
+          $("board").innerHTML = '<tr><td colspan="4">Failed to load 读取失败: ' + errText(e) + "</td></tr>";
+        }
+      }
+
+      async function refreshBoard(expectedTotal) {
+        var tbody = $("board");
+        var c = getReadContract();
+        if (!c) return;
+        try {
+          var latest = await readProvider.getBlockNumber();
+          var CHUNK = 20000;
+          var byUser = new Map();
+          for (var start = DEPLOY_BLOCK; start <= latest; start += CHUNK) {
+            var end = Math.min(latest, start + CHUNK - 1);
+            var events = await c.queryFilter(c.filters.CheckIn(), start, end);
+            for (var i = 0; i < events.length; i++) {
+              var u = events[i].args.user.toLowerCase();
+              var prev = byUser.get(u) || { total: 0, streak: 0 };
+              byUser.set(u, { total: prev.total + 1, streak: Number(events[i].args.streak) });
+            }
+            if (expectedTotal && byUser.size >= expectedTotal) break;
+          }
+          var ranked = Array.from(byUser.entries()).sort(function (a, b) {
+            return b[1].streak - a[1].streak || b[1].total - a[1].total;
+          }).slice(0, 50);
+          if (!ranked.length) { tbody.innerHTML = '<tr><td colspan="4">No check-ins yet — be the first. 还没有人打卡，来打第一卡。</td></tr>'; return; }
+          tbody.innerHTML = ranked.map(function (r, i) {
+            return "<tr><td>" + (i + 1) + '</td><td class="mono">' + short(r[0]) + '</td><td class="num">' + r[1].streak + '</td><td class="num">' + r[1].total + "</td></tr>";
+          }).join("");
+        } catch (e) {
+          tbody.innerHTML = '<tr><td colspan="4">Couldn\'t load the leaderboard 排行榜读取失败: ' + errText(e) + "</td></tr>";
+        }
+      }
+
+      async function refreshMyState() {
+        if (!account) return;
+        var c = getReadContract();
+        if (!c) return;
+        try {
+          var u = await c.getUser(account);
+          var today = await c.currentDay();
+          $("my-streak").textContent = u[1].toString();
+          $("my-total").textContent = u[2].toString();
+          checkedToday = u[0] === today && u[2] > 0n;
+          myLoaded = true;
+          if (!isHolder) $("checkin-note").textContent = "Wallet " + short(account) + " holds no Agent ID and can't check in. Switch to a wallet that holds one. 当前钱包 " + short(account) + " 没有 Agent ID，不能打卡。换成持有 Agent ID 的钱包再来。";
+          else if (checkedToday) $("checkin-note").textContent = "You've already checked in today — come back tomorrow. The day rolls over at 00:00 UTC, which is 8:00 AM Beijing time. 今天已经打过卡了，明天再来。换日时间是 UTC 0 点，也就是北京时间早上 8 点。";
+          else $("checkin-note").textContent = "This wallet holds an Agent ID — you can check in. Gas is only a few cents. 当前钱包持有 Agent ID，可以打卡。打卡只付几分钱 gas。";
+        } catch (e) {
+          $("checkin-note").textContent = "Couldn't read your check-in status 读取我的打卡状态失败: " + errText(e);
+        }
+        updateCheckinBtn();
+      }
+
+      function updateCheckinBtn() {
+        var btn = $("checkin-btn");
+        if (!account) { btn.disabled = true; btn.textContent = "Connect a wallet first 先连接钱包才能打卡"; return; }
+        if (!myLoaded) { btn.disabled = true; btn.textContent = "Reading your status… 正在读取状态…"; return; }
+        if (!isHolder) { btn.disabled = true; btn.textContent = "This wallet holds no Agent ID 这个钱包没有 Agent ID"; return; }
+        if (checkedToday) { btn.disabled = true; btn.textContent = "Checked in today ✓ 今天已打卡 ✓"; return; }
+        btn.disabled = false; btn.textContent = "Check in today 今天打卡";
+      }
+
+      async function doCheckIn() {
+        if (!signer) return;
+        var btn = $("checkin-btn");
+        btn.disabled = true; btn.textContent = "Waiting for you to confirm in the app… 等你在 App 里确认…";
+        try {
+          var live = new ethers.Contract(CONTRACT, ABI, signer);
+          var tx = await live.checkIn();
+          $("tx-line").innerHTML = 'Transaction sent 交易已发出: <a href="https://bscscan.com/tx/' + tx.hash + '" target="_blank" rel="noopener">' + short(tx.hash) + "</a> — waiting for confirmation… 等上链确认…";
+          $("checkin-note").textContent = "Transaction sent — waiting for on-chain confirmation… 交易已发出，等上链确认…";
+          await tx.wait();
+          $("tx-line").innerHTML = 'Checked in ✓ 打卡成功 ✓ <a href="https://bscscan.com/tx/' + tx.hash + '" target="_blank" rel="noopener">View this transaction on BscScan 在 BscScan 上查看这笔交易</a>';
+          $("checkin-note").textContent = "Checked in ✓ 打卡成功 ✓";
+          await refreshMyState();
+          await refreshPublic();
+        } catch (e) {
+          $("checkin-note").textContent = "Check-in failed 打卡失败: " + errText(e);
+          btn.disabled = false; btn.textContent = "Check in today 今天打卡";
+          updateCheckinBtn();
+        }
+      }
+
+      window.addEventListener("load", function () {
+        if (typeof ethers === "undefined") { $("no-lib").classList.remove("hidden"); return; }
+        if (!getInjected()) {
+          setCheck("ck-wallet", "wait", "No wallet detected in this browser (one appears when you open this page in the Binance App's built-in browser). 当前浏览器没检测到钱包（在币安 App 内置浏览器打开才会出现）。");
+        }
+        refreshPublic();
+      });
+
+      $("connect-btn").addEventListener("click", connect);
+      $("checkin-btn").addEventListener("click", doCheckIn);
+
+      var inj = getInjected();
+      if (inj && inj.on) {
+        inj.on("accountsChanged", function () { window.location.reload(); });
+        inj.on("chainChanged", function () { window.location.reload(); });
+      }
+    </script>
+  </body>
+</html>
