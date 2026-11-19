@@ -216,6 +216,10 @@
           <thead><tr><th>#</th><th>Address</th><th class="num">Total</th><th class="num">Streak</th></tr></thead>
           <tbody id="board"><tr><td colspan="4">Loading…</td></tr></tbody>
         </table>
+        <div class="notice warn hidden" id="board-error">
+          <p style="margin:0 0 10px">The leaderboard and total check-ins couldn't load: public BSC nodes are rate-limiting the event reads this page uses. The <strong>Total checkers</strong> number above comes from a simple contract call and is unaffected. Wait a moment, then try again.</p>
+          <button class="btn-small" id="board-retry" type="button">Retry</button>
+        </div>
       </section>
 
       <section class="card" aria-labelledby="how-h">
@@ -363,7 +367,15 @@ contract AgentCheckIn {
       var CONTRACT = "0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36";
       var DEPLOY_BLOCK = 134570129;
       var REGISTRY = "0x60b9262456de011f7d15a54cdd8c48baaa8b022f";
-      var BSC_RPC = "https://bsc-dataseed.binance.org/";
+      var RPCS = [
+        "https://bsc-dataseed.binance.org/",
+        "https://bsc-dataseed1.defibit.io/",
+        "https://bsc-dataseed2.defibit.io/",
+        "https://bsc-dataseed1.ninicoin.io/",
+        "https://1rpc.io/bnb",
+        "https://bsc.drpc.org"
+      ];
+      var BSC_RPC = RPCS[0];
       var ABI = [
         "event CheckIn(address indexed user, uint256 indexed day, uint256 streak)",
         "function checkIn()",
@@ -391,49 +403,133 @@ contract AgentCheckIn {
         return readContract;
       }
 
+      function sleep(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+      function withTimeout(p, ms, label) {
+        return Promise.race([
+          p,
+          new Promise(function (_, rej) { setTimeout(function () { rej(new Error(label || "request timed out")); }, ms); })
+        ]);
+      }
+      function makeProvider(url) {
+        return new ethers.JsonRpcProvider(url, 56, { staticNetwork: true, batchMaxCount: 1 });
+      }
+
+      // Scan CheckIn events backwards from the latest block to the deployment
+      // block. Some public nodes cap the eth_getLogs block range (down to 50
+      // blocks), so the chunk size adapts: it halves on failure and grows back
+      // on success. Scanning stops early once every known checker is found.
+      // Returns a Map of address -> { total, streak } counted from the events
+      // (scanning backwards, the first event seen per user carries its
+      // current streak).
+      async function scanEvents(provider, expectedTotal) {
+        var c = new ethers.Contract(CONTRACT, ABI, provider);
+        var latest = await withTimeout(provider.getBlockNumber(), 20000, "eth_blockNumber timed out");
+        var byUser = new Map();
+        var MAX_CHUNK = 10000, MIN_CHUNK = 50;
+        var chunk = MAX_CHUNK;
+        var ceiling = MAX_CHUNK; // regrowth cap: half the smallest size that has failed on this node
+        var end = latest;
+        while (end >= DEPLOY_BLOCK) {
+          var start = Math.max(DEPLOY_BLOCK, end - chunk + 1);
+          var events = null, lastErr = null, tries = 0;
+          while (events === null) {
+            try {
+              events = await withTimeout(c.queryFilter(c.filters.CheckIn(), start, end), 30000, "eth_getLogs timed out");
+            } catch (e) {
+              lastErr = e;
+              tries += 1;
+              // At the minimum chunk size a failure is usually a transient
+              // rate limit, not the range: retry the same chunk a few times
+              // with backoff before giving up on this node.
+              if (chunk <= MIN_CHUNK && tries <= 4) { await sleep(1000 * tries); continue; }
+              break;
+            }
+          }
+          if (events === null) {
+            if (chunk > MIN_CHUNK) {
+              ceiling = Math.min(ceiling, Math.max(MIN_CHUNK, Math.floor(chunk / 2)));
+              chunk = Math.max(MIN_CHUNK, Math.floor(chunk / 2));
+              continue;
+            }
+            throw lastErr;
+          }
+          for (var i = 0; i < events.length; i++) {
+            var u = events[i].args.user.toLowerCase();
+            var prev = byUser.get(u);
+            if (prev) { prev.total += 1; }
+            else { byUser.set(u, { total: 1, streak: Number(events[i].args.streak) }); }
+          }
+          end = start - 1;
+          if (expectedTotal && byUser.size >= expectedTotal) break;
+          if (chunk < ceiling) chunk = Math.min(ceiling, chunk * 2);
+          await sleep(80); // pace requests so free nodes don't trip their rate limit
+        }
+        return byUser;
+      }
+
+      // Try each public BSC node in turn, retrying a node once before moving
+      // on to the next, until one of them returns the events.
+      async function fetchCheckers(expectedTotal) {
+        var lastErr = null;
+        for (var r = 0; r < RPCS.length; r++) {
+          for (var attempt = 0; attempt < 2; attempt++) {
+            try {
+              return await scanEvents(makeProvider(RPCS[r]), expectedTotal);
+            } catch (e) {
+              lastErr = e;
+              if (attempt === 0) await sleep(800);
+            }
+          }
+        }
+        throw lastErr || new Error("All public BSC nodes failed to return the check-in events.");
+      }
+
       async function refreshPublic() {
+        if (typeof ethers === "undefined") return;
+        $("board-error").classList.add("hidden");
+        $("board").innerHTML = '<tr><td colspan="4">Loading…</td></tr>';
+        var expectedTotal = null;
         var c = getReadContract();
-        if (!c) return;
+        if (c) {
+          try {
+            expectedTotal = Number(await c.totalCheckers());
+            $("total-checkers").textContent = expectedTotal;
+          } catch (e) { /* plain contract call; if it fails, the event scan below still runs without the early-stop hint */ }
+        }
         try {
-          var total = Number(await c.totalCheckers());
-          $("total-checkers").textContent = total;
-          refreshBoard(total);
+          var byUser = await fetchCheckers(expectedTotal);
+          await renderBoard(byUser);
         } catch (e) {
-          $("board").innerHTML = '<tr><td colspan="4">Failed to load: ' + errText(e) + "</td></tr>";
+          $("board").innerHTML = '<tr><td colspan="4">Couldn\'t load the leaderboard.</td></tr>';
+          $("board-error").classList.remove("hidden");
         }
       }
 
-      async function refreshBoard(expectedTotal) {
+      async function renderBoard(byUser) {
         var tbody = $("board");
-        var c = getReadContract();
-        if (!c) return;
-        try {
-          var latest = await readProvider.getBlockNumber();
-          var CHUNK = 20000;
-          var byUser = new Map();
-          var totalCheckIns = 0;
-          for (var start = DEPLOY_BLOCK; start <= latest; start += CHUNK) {
-            var end = Math.min(latest, start + CHUNK - 1);
-            var events = await c.queryFilter(c.filters.CheckIn(), start, end);
-            for (var i = 0; i < events.length; i++) {
-              var u = events[i].args.user.toLowerCase();
-              var prev = byUser.get(u) || { total: 0, streak: 0 };
-              byUser.set(u, { total: prev.total + 1, streak: Number(events[i].args.streak) });
-              totalCheckIns += 1;
-            }
-            if (expectedTotal && byUser.size >= expectedTotal && start + CHUNK > latest) break;
-          }
-          $("total-checkins").textContent = totalCheckIns;
-          var ranked = Array.from(byUser.entries()).sort(function (a, b) {
-            return b[1].total - a[1].total || b[1].streak - a[1].streak;
-          }).slice(0, 50);
-          if (!ranked.length) { tbody.innerHTML = '<tr><td colspan="4">No check-ins yet — be the first, via your agent.</td></tr>'; return; }
-          tbody.innerHTML = ranked.map(function (r, i) {
-            return "<tr><td>" + (i + 1) + '</td><td class="mono">' + short(r[0]) + '</td><td class="num">' + r[1].total + '</td><td class="num">' + r[1].streak + "</td></tr>";
-          }).join("");
-        } catch (e) {
-          tbody.innerHTML = '<tr><td colspan="4">Couldn\'t load the leaderboard: ' + errText(e) + "</td></tr>";
+        var list = Array.from(byUser.entries());
+        if (!list.length) {
+          $("total-checkins").textContent = 0;
+          tbody.innerHTML = '<tr><td colspan="4">No check-ins yet — be the first, via your agent.</td></tr>';
+          return;
         }
+        var c = getReadContract();
+        var rows = await Promise.all(list.map(async function (entry) {
+          var addr = entry[0], ev = entry[1];
+          if (c) {
+            try {
+              var u = await c.getUser(addr);
+              return { addr: addr, total: Number(u[2]), streak: Number(u[1]) };
+            } catch (e) { /* fall through to the event-derived numbers */ }
+          }
+          return { addr: addr, total: ev.total, streak: ev.streak };
+        }));
+        var totalCheckIns = rows.reduce(function (s, r) { return s + r.total; }, 0);
+        $("total-checkins").textContent = totalCheckIns;
+        rows.sort(function (a, b) { return b.total - a.total || b.streak - a.streak; });
+        tbody.innerHTML = rows.slice(0, 50).map(function (r, i) {
+          return "<tr><td>" + (i + 1) + '</td><td class="mono">' + short(r.addr) + '</td><td class="num">' + r.total + '</td><td class="num">' + r.streak + "</td></tr>";
+        }).join("");
       }
 
       async function lookupStatus() {
@@ -515,6 +611,7 @@ contract AgentCheckIn {
       });
 
       $("copy-btn").addEventListener("click", copyPrompt);
+      $("board-retry").addEventListener("click", refreshPublic);
       $("lookup-btn").addEventListener("click", lookupStatus);
       $("addr-input").addEventListener("keydown", function (ev) {
         if (ev.key === "Enter") { ev.preventDefault(); lookupStatus(); }
