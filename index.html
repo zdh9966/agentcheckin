@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" href="data:," />
-    <title>AgentCheckIn — Daily Check-In</title>
+    <title>AgentCheckIn — Daily Check-In via AI Agent</title>
     <meta property="og:type" content="website" />
     <meta property="og:title" content="AgentCheckIn — Daily Check-In" />
-    <meta property="og:description" content="A daily check-in for holders of a .ai name. Check in once per UTC day — streaks and totals stored on-chain on BSC, with a live leaderboard." />
+    <meta property="og:description" content="A daily check-in for holders of a .ai name. Check in once per UTC day with your AI agent — streaks and totals stored on-chain on BSC, with a live leaderboard." />
     <meta property="og:url" content="https://zdh9966.github.io/agentcheckin/" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="AgentCheckIn — Daily Check-In" />
-    <meta name="twitter:description" content="A daily check-in for holders of a .ai name. Check in once per UTC day — streaks and totals stored on-chain on BSC, with a live leaderboard." />
+    <meta name="twitter:description" content="A daily check-in for holders of a .ai name. Check in once per UTC day with your AI agent — streaks and totals stored on-chain on BSC, with a live leaderboard." />
     <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
     <style>
       :root {
@@ -60,7 +60,8 @@
       }
       main { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; }
       h1 { font-size: 26px; line-height: 1.3; margin: 6px 0 8px; letter-spacing: 0; }
-      h2 { font-size: 18px; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      h2 { font-size: 18px; margin: 0 0 10px; }
+      h3 { font-size: 16px; margin: 0 0 4px; display: flex; align-items: flex-start; gap: 10px; }
       p { margin: 8px 0; }
       .lede { color: var(--muted); font-size: 16px; margin-top: 0; }
       .card {
@@ -78,7 +79,14 @@
         color: var(--accent-ink);
         font-size: 15px; font-weight: 800;
         display: inline-flex; align-items: center; justify-content: center;
+        margin-top: 1px;
       }
+      .step { padding: 12px 0; border-bottom: 1px solid var(--line); }
+      .step:first-of-type { padding-top: 4px; }
+      .step:last-of-type { border-bottom: 0; padding-bottom: 0; }
+      .step p { margin: 4px 0 4px 38px; }
+      .step .prompt-wrap { margin: 10px 0 0 38px; }
+      @media (max-width: 480px) { .step p, .step .prompt-wrap { margin-left: 0; } .step p { margin-left: 38px; } .step .prompt-wrap { margin-left: 0; } }
       .facts {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
@@ -111,23 +119,30 @@
         font-family: inherit;
       }
       .btn:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
+      .btn-small {
+        display: inline-block;
+        min-height: 40px;
+        padding: 8px 16px;
+        font-size: 14.5px;
+        font-weight: 700;
+        border: 0;
+        border-radius: 8px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        cursor: pointer;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .btn-small:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
       code, .mono { font-family: var(--mono); font-size: 13.5px; word-break: break-all; }
-      .check { list-style: none; margin: 10px 0; padding: 0; font-size: 15px; }
-      .check li { padding: 5px 0 5px 30px; position: relative; }
-      .check li::before { position: absolute; left: 2px; top: 5px; font-weight: 800; }
-      .check li.wait::before { content: "·"; color: var(--muted); }
-      .check li.ok::before { content: "✓"; color: var(--ok); }
-      .check li.bad::before { content: "✗"; color: var(--bad); }
-      .check .sub { color: var(--muted); font-size: 13.5px; display: block; }
       .notice { border-radius: 10px; padding: 12px 14px; font-size: 14.5px; margin: 12px 0; }
       .notice.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); }
       .notice.ok { background: var(--ok-bg); border: 1px solid var(--ok); }
       .notice.bad { background: var(--bad-bg); border: 1px solid var(--bad); }
-      .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 6px; text-align: center; }
+      .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 6px 0 14px; text-align: center; }
+      .stat { background: var(--surface-2); border-radius: 10px; padding: 12px 8px; }
       .stat .n { font-size: 30px; font-weight: 800; line-height: 1.15; }
       .stat .t { font-size: 13px; color: var(--muted); }
-      .progress { height: 12px; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin: 10px 0 4px; border: 1px solid var(--line); }
-      .progress > div { height: 100%; background: var(--accent); width: 0%; transition: width .4s ease; }
       table.board { width: 100%; border-collapse: collapse; font-size: 14.5px; }
       table.board th, table.board td { padding: 7px 6px; border-bottom: 1px solid var(--line); text-align: left; }
       table.board th.num, table.board td.num { text-align: right; }
@@ -140,71 +155,129 @@
         font-family: var(--mono); font-size: 12px; line-height: 1.55;
         overflow-x: auto; white-space: pre;
       }
+      .prompt-box {
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+        font-size: 14.5px;
+        line-height: 1.6;
+      }
+      .prompt-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+      .copy-msg { font-size: 13.5px; color: var(--ok); font-weight: 600; }
       a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
       .hidden { display: none !important; }
       ul.tight { margin: 8px 0; padding-left: 20px; }
       ul.tight li { margin: 4px 0; }
-      @media (prefers-reduced-motion: reduce) { .progress > div { transition: none; } }
+      .lookup-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+      .lookup-row input {
+        flex: 1 1 260px;
+        min-height: 48px;
+        padding: 10px 12px;
+        font-size: 15px;
+        font-family: var(--mono);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface);
+        color: var(--ink);
+      }
+      .lookup-row .btn { flex: 0 1 180px; margin: 0; min-height: 48px; font-size: 16px; }
+      @media (max-width: 480px) { .lookup-row .btn { flex: 1 1 100%; } }
+      .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+      @media (max-width: 480px) { .result-grid { grid-template-columns: 1fr; } }
+      .result-item { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+      .result-item .k { font-size: 12.5px; color: var(--muted); }
+      .result-item .v { font-size: 16px; font-weight: 700; margin-top: 2px; word-break: break-word; }
     </style>
   </head>
   <body>
     <main>
-      <h1>AgentCheckIn Daily Check-In</h1>
-      <p class="lede">A daily check-in for holders of a Binance Agent ID (<code>.ai</code>). The contract is live on BSC mainnet: check in once a day, and your streak and total check-ins are recorded on-chain.</p>
+      <h1>AgentCheckIn — Daily Check-In via AI Agent</h1>
+      <p class="lede">A daily check-in for holders of a Binance Agent ID (<code>.ai</code>). There is no wallet connect on this page — check-ins are done by your AI agent through your Binance Agentic Wallet. The contract is live on BNB Smart Chain: one check-in per UTC day, and your streak and total check-ins are recorded on-chain.</p>
 
       <div class="facts">
-        <div class="fact"><div class="k">Network</div><div class="v">BSC Mainnet</div></div>
+        <div class="fact"><div class="k">Network</div><div class="v">BNB Smart Chain (56)</div></div>
         <div class="fact"><div class="k">Check-in cost</div><div class="v">Gas only, a few cents</div></div>
         <div class="fact"><div class="k">Day rolls over</div><div class="v">00:00 UTC</div></div>
       </div>
       <p class="fine">The entry window closes at <strong>16:00 on Dec 9</strong>. Contract: <a href="https://bscscan.com/address/0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36" target="_blank" rel="noopener"><code>0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36</code></a> (tap to view on BscScan).</p>
 
-      <div class="notice warn" id="open-tip">
-        <strong>How to open:</strong> Checking in needs a wallet signature, so open this page in the <strong>Binance App's built-in browser</strong> and switch to the wallet that holds your Agent ID. Opened in a regular browser or on a desktop there is no wallet — you can still view the checker count and the leaderboard, but you can't check in.
-      </div>
       <div class="notice bad hidden" id="no-lib">A page component failed to load (network problem) — check your connection and refresh this page.</div>
 
-      <section class="card" aria-labelledby="s1">
-        <h2 id="s1"><span class="step-num">1</span>Connect your wallet</h2>
-        <p>Tap the button below and confirm the connection in the Binance App. The page then checks three things automatically: your wallet address, whether this wallet holds an Agent ID, and whether the network is BSC Mainnet.</p>
-        <button class="btn" id="connect-btn">Connect Wallet</button>
-        <ul class="check">
-          <li id="ck-wallet" class="wait">Wallet address<span class="sub">Not connected</span></li>
-          <li id="ck-holder" class="wait">Agent ID<span class="sub">Only addresses holding an Agent ID (.ai name) can check in</span></li>
-          <li id="ck-chain" class="wait">Network<span class="sub">BSC Mainnet (chainId 56) required — switched for you automatically if needed</span></li>
-        </ul>
-      </section>
-
-      <section class="card" aria-labelledby="s2">
-        <h2 id="s2"><span class="step-num">2</span>Daily check-in</h2>
+      <section class="card" aria-labelledby="live-h">
+        <h2 id="live-h">Live on-chain stats</h2>
         <div class="stats">
-          <div class="stat"><div class="n" id="my-streak">–</div><div class="t">My streak (days)</div></div>
-          <div class="stat"><div class="n" id="my-total">–</div><div class="t">My total check-ins</div></div>
           <div class="stat"><div class="n" id="total-checkers">–</div><div class="t">Total checkers</div></div>
+          <div class="stat"><div class="n" id="total-checkins">–</div><div class="t">Total check-ins</div></div>
         </div>
-        <button class="btn" id="checkin-btn" disabled>Connect a wallet first</button>
-        <p class="fine" id="checkin-note">No wallet connected yet. Once connected, this shows whether you can check in today.</p>
-        <p class="fine" id="tx-line"></p>
-      </section>
-
-      <section class="card" aria-labelledby="s3">
-        <h2 id="s3"><span class="step-num">3</span>Leaderboard</h2>
-        <p class="fine" style="margin-top:0">Ranked by streak, then by total check-ins. A holder's <code>.ai</code> name is shown when it can be resolved; otherwise the address is shown — names are never made up.</p>
+        <h2 style="margin-top:16px">Leaderboard</h2>
+        <p class="fine" style="margin-top:0">Ranked by total check-ins, then by streak. Read directly from on-chain check-in events — no wallet connection needed. Addresses are shown shortened; names are never made up.</p>
         <table class="board">
-          <thead><tr><th>#</th><th>Address / Name</th><th class="num">Streak</th><th class="num">Total</th></tr></thead>
+          <thead><tr><th>#</th><th>Address</th><th class="num">Total</th><th class="num">Streak</th></tr></thead>
           <tbody id="board"><tr><td colspan="4">Loading…</td></tr></tbody>
         </table>
       </section>
 
-      <section class="card" aria-labelledby="s4">
-        <h2 id="s4">About the contract &amp; risks</h2>
+      <section class="card" aria-labelledby="how-h">
+        <h2 id="how-h">How to check in</h2>
+
+        <div class="step">
+          <h3><span class="step-num">1</span><span>Have a Binance Agentic Wallet with an Agent ID</span></h3>
+          <p>You need a Binance Agentic Wallet that holds an Agent ID (<code>.ai</code> name). If you don't have one yet, claim it in the Binance App first — the Agent ID is bound to the Agentic Wallet and cannot be transferred to another wallet.</p>
+        </div>
+
+        <div class="step">
+          <h3><span class="step-num">2</span><span>Pair your agent and turn on Developer Mode</span></h3>
+          <p>Pair your AI agent with the wallet by scanning the QR code in the Binance App — that scan is the only way an agent connects to an Agentic Wallet. Then turn on <strong>Developer Mode</strong> in the Agentic Wallet settings, so your agent is allowed to make contract calls.</p>
+        </div>
+
+        <div class="step">
+          <h3><span class="step-num">3</span><span>Give your agent this prompt</span></h3>
+          <p>Copy the prompt below and send it to your paired AI agent. It will call the contract from your Agentic Wallet and report your streak and total back to you.</p>
+          <div class="prompt-wrap">
+            <div class="prompt-box" id="agent-prompt">Using my Binance Agentic Wallet (with the Binance Agentic Wallet skill), call checkIn() on the AgentCheckIn contract at 0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36 on BNB Smart Chain (chain ID 56). My wallet must hold an Agent ID (.ai name). One check-in per UTC day; it records my streak and total check-ins on-chain. Confirm the transaction on-chain and report back my streak and total.</div>
+            <div class="prompt-actions">
+              <button class="btn-small" id="copy-btn" type="button">Copy prompt</button>
+              <span class="copy-msg hidden" id="copy-msg">Copied — paste it to your agent.</span>
+            </div>
+            <p class="fine">Repeat once a day. Check in on consecutive UTC days to grow your streak; miss a day and the streak restarts at 1.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="status-h">
+        <h2 id="status-h">Check your status</h2>
+        <p style="margin-top:0">Enter any BNB Smart Chain address to see its on-chain status. This is a read-only lookup — no wallet connection, no signature.</p>
+        <div class="lookup-row">
+          <input id="addr-input" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="0x… wallet address" aria-label="Wallet address" />
+          <button class="btn" id="lookup-btn" type="button">Check status</button>
+        </div>
+        <p class="fine hidden" id="lookup-error" style="color:var(--bad)"></p>
+        <div class="result-grid hidden" id="lookup-results">
+          <div class="result-item"><div class="k">Holds an Agent ID</div><div class="v" id="res-holder">–</div></div>
+          <div class="result-item"><div class="k">Streak (days)</div><div class="v" id="res-streak">–</div></div>
+          <div class="result-item"><div class="k">Total check-ins</div><div class="v" id="res-total">–</div></div>
+          <div class="result-item"><div class="k">Last check-in day (UTC)</div><div class="v" id="res-lastday">–</div></div>
+        </div>
+        <p class="fine hidden" id="lookup-note"></p>
+      </section>
+
+      <section class="card" aria-labelledby="why-h">
+        <h2 id="why-h">Why can't I connect my wallet here?</h2>
+        <p>Binance Agentic Wallets can't connect to websites — no Connect button exists for them. An Agentic Wallet is driven by an AI agent, and the only way to link one is by scanning a QR code in the Binance App to pair your agent.</p>
+        <p>The wallet your browser offers instead — the Binance keyless wallet, on desktop or in the app browser — is a different wallet. It never holds an Agent ID, because the <code>.ai</code> name is bound to the Agentic Wallet only. So even a successful “connect” here could never check in.</p>
+        <p style="margin-bottom:0">That's why this page has no Connect Wallet button at all: <strong>check in through your AI agent instead</strong>, using the three steps above.</p>
+      </section>
+
+      <section class="card" aria-labelledby="about-h">
+        <h2 id="about-h">About the contract</h2>
         <ul class="tight">
-          <li><strong>What it does:</strong> <code>checkIn()</code> can be called once per day. Check in the day after your last check-in and your streak grows by 1; miss a day and it restarts at 1. Every check-in emits an on-chain event, and the leaderboard is computed from those events.</li>
+          <li><strong>Contract:</strong> <a href="https://bscscan.com/address/0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36" target="_blank" rel="noopener">0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36</a> on BNB Smart Chain (chain ID 56), deployed at block 134570129 · <a href="https://bscscan.com/tx/0xe804bab2b4edefeda2fecc1528a8e6bc6a33eb30ff8e723890536d72813a2c9a" target="_blank" rel="noopener">Deployment transaction</a></li>
+          <li><strong>Source Code Verified</strong> on BscScan — the published source matches the deployed bytecode exactly.</li>
+          <li><strong>What it does:</strong> <code>checkIn()</code> can be called once per day. Check in the day after your last check-in and your streak grows by 1; miss a day and it restarts at 1. The day rolls over at 00:00 UTC. Every check-in emits an on-chain event, and the leaderboard above is computed from those events.</li>
           <li><strong>The gate:</strong> Only addresses holding an Agent ID can check in. The contract checks <code>balanceOf</code> on the official registry <code>0x60b9262456de011f7d15a54cdd8c48baaa8b022f</code>.</li>
-          <li><strong>What it doesn't do:</strong> It takes no money, custodies no assets, has no token, and checking in promises no returns or airdrops. There is no admin backdoor: no owner, it can't be paused, it can't be upgraded — nobody can change the rules after deployment.</li>
-          <li><strong>Cost:</strong> You pay the gas from your own wallet — about 0.00005–0.00014 BNB per check-in (a few cents).</li>
+          <li><strong>No owner, no fees, no custody:</strong> There is no owner and no admin backdoor — the contract can't be paused or upgraded, and nobody can change the rules after deployment. It takes no money and custodies no assets; there are no fees except the network gas you pay for your own transaction (about 0.00005–0.00014 BNB per check-in, a few cents). It has no token, and checking in promises no returns or airdrops.</li>
           <li><strong>Public record:</strong> Check-in records are fully public on-chain; anyone can see how many days an address has checked in.</li>
-          <li><strong>Contract:</strong> <a href="https://bscscan.com/address/0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36" target="_blank" rel="noopener">0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36</a> (BSC Mainnet, deployed at block 134570129) · <a href="https://bscscan.com/tx/0xe804bab2b4edefeda2fecc1528a8e6bc6a33eb30ff8e723890536d72813a2c9a" target="_blank" rel="noopener">Deployment transaction</a></li>
         </ul>
         <details>
           <summary>View the contract source</summary>
@@ -275,15 +348,15 @@ contract AgentCheckIn {
         <details>
           <summary>Troubleshooting</summary>
           <ul class="tight">
-            <li><strong>Tapping Connect does nothing:</strong> Most likely the page isn't open in the Binance App's built-in browser. Paste this page's link into the browser inside the Binance App and try again.</li>
-            <li><strong>It says you have no Agent ID:</strong> This wallet never claimed an Agent ID (.ai name). Switch to a wallet that claimed one, or claim one in the Binance App first.</li>
-            <li><strong>Already checked in today:</strong> That's normal — come back tomorrow. The day rolls over at 00:00 UTC.</li>
-            <li><strong>The check-in transaction failed:</strong> If it never landed on-chain, it costs nothing. Read the failure reason, fix it, and tap check-in again.</li>
+            <li><strong>My agent says the wallet holds no Agent ID:</strong> The paired Agentic Wallet never claimed an Agent ID (.ai name), or a different wallet is paired. Claim an Agent ID for that Agentic Wallet in the Binance App, then ask your agent to try again.</li>
+            <li><strong>My agent can't make the call:</strong> Make sure the agent is paired by QR scan in the Binance App and Developer Mode is turned on in the Agentic Wallet settings.</li>
+            <li><strong>Already checked in today:</strong> That's normal — one check-in per UTC day. Ask your agent again tomorrow; the day rolls over at 00:00 UTC.</li>
+            <li><strong>The check-in transaction failed:</strong> If it never landed on-chain, it costs nothing. Read the failure reason your agent reports, fix it, and try again.</li>
           </ul>
         </details>
       </section>
 
-      <p class="fine">This page collects and uploads nothing: connecting and checking in go straight from your wallet to the BSC chain, and the checker count and leaderboard are computed by reading public on-chain data.</p>
+      <p class="fine">This page collects and uploads nothing: the stats, the leaderboard, and the status lookup are all computed by reading public on-chain data, and check-ins happen only between your agent, your Agentic Wallet, and the BSC chain.</p>
     </main>
     <script>
       "use strict";
@@ -302,9 +375,7 @@ contract AgentCheckIn {
       var REGISTRY_ABI = ["function balanceOf(address account) view returns (uint256)"];
 
       var $ = function (id) { return document.getElementById(id); };
-      var provider = null, signer = null, account = null;
       var readProvider = null, readContract = null;
-      var isHolder = false, checkedToday = false, myLoaded = false;
 
       function short(a) { return a ? a.slice(0, 6) + "…" + a.slice(-4) : ""; }
       function errText(e) {
@@ -312,78 +383,12 @@ contract AgentCheckIn {
         var m = e.shortMessage || e.reason || e.message || String(e);
         return String(m).slice(0, 220);
       }
-      function setCheck(id, state, sub) {
-        var li = $(id);
-        li.className = state;
-        var s = li.querySelector(".sub");
-        if (s && sub != null) s.textContent = sub;
-      }
-
-      function getInjected() {
-        if (window.ethereum) return window.ethereum;
-        if (window.BinanceChain && window.BinanceChain.ethereum) return window.BinanceChain.ethereum;
-        if (window.BinanceChain) return window.BinanceChain;
-        return null;
-      }
 
       function getReadContract() {
         if (typeof ethers === "undefined") return null;
         if (!readProvider) readProvider = new ethers.JsonRpcProvider(BSC_RPC);
         if (!readContract) readContract = new ethers.Contract(CONTRACT, ABI, readProvider);
         return readContract;
-      }
-
-      async function connect() {
-        if (typeof ethers === "undefined") { $("no-lib").classList.remove("hidden"); return; }
-        var injected = getInjected();
-        if (!injected) {
-          setCheck("ck-wallet", "bad", "No wallet detected. Open this page in the Binance App's built-in browser — not a regular browser or a desktop.");
-          return;
-        }
-        try {
-          provider = new ethers.BrowserProvider(injected);
-          await provider.send("eth_requestAccounts", []);
-          var net = await provider.getNetwork();
-          if (Number(net.chainId) !== 56) {
-            try {
-              await injected.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x38" }] });
-            } catch (swErr) {
-              if (swErr && swErr.code === 4902) {
-                await injected.request({
-                  method: "wallet_addEthereumChain",
-                  params: [{ chainId: "0x38", chainName: "BNB Smart Chain", nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 }, rpcUrls: [BSC_RPC], blockExplorerUrls: ["https://bscscan.com"] }]
-                });
-              } else { throw swErr; }
-            }
-            provider = new ethers.BrowserProvider(injected);
-          }
-          signer = await provider.getSigner();
-          account = await signer.getAddress();
-          setCheck("ck-wallet", "ok", account);
-          $("connect-btn").textContent = "Connected — tap to refresh";
-          await refreshWalletChecks();
-          await refreshMyState();
-        } catch (e) {
-          setCheck("ck-wallet", "bad", "Connection failed: " + errText(e));
-        }
-      }
-
-      async function refreshWalletChecks() {
-        if (!provider || !account) return;
-        try {
-          var net = await provider.getNetwork();
-          if (Number(net.chainId) === 56) setCheck("ck-chain", "ok", "On BSC Mainnet ✓");
-          else setCheck("ck-chain", "bad", "Current chainId " + net.chainId + " is not BSC Mainnet");
-        } catch (e) { setCheck("ck-chain", "bad", "Couldn't read the network: " + errText(e)); }
-        try {
-          var c = getReadContract();
-          if (!c) return;
-          var reg = new ethers.Contract(REGISTRY, REGISTRY_ABI, readProvider);
-          var bal = await reg.balanceOf(account);
-          isHolder = bal > 0n;
-          setCheck("ck-holder", isHolder ? "ok" : "bad",
-            isHolder ? "This wallet holds an Agent ID ✓ — you can check in" : "This wallet holds no Agent ID, so it can't check in. Switch to a wallet that claimed one, or claim one in the Binance App first.");
-        } catch (e) { setCheck("ck-holder", "bad", "Couldn't read Agent ID status: " + errText(e)); }
       }
 
       async function refreshPublic() {
@@ -406,6 +411,7 @@ contract AgentCheckIn {
           var latest = await readProvider.getBlockNumber();
           var CHUNK = 20000;
           var byUser = new Map();
+          var totalCheckIns = 0;
           for (var start = DEPLOY_BLOCK; start <= latest; start += CHUNK) {
             var end = Math.min(latest, start + CHUNK - 1);
             var events = await c.queryFilter(c.filters.CheckIn(), start, end);
@@ -413,87 +419,106 @@ contract AgentCheckIn {
               var u = events[i].args.user.toLowerCase();
               var prev = byUser.get(u) || { total: 0, streak: 0 };
               byUser.set(u, { total: prev.total + 1, streak: Number(events[i].args.streak) });
+              totalCheckIns += 1;
             }
-            if (expectedTotal && byUser.size >= expectedTotal) break;
+            if (expectedTotal && byUser.size >= expectedTotal && start + CHUNK > latest) break;
           }
+          $("total-checkins").textContent = totalCheckIns;
           var ranked = Array.from(byUser.entries()).sort(function (a, b) {
-            return b[1].streak - a[1].streak || b[1].total - a[1].total;
+            return b[1].total - a[1].total || b[1].streak - a[1].streak;
           }).slice(0, 50);
-          if (!ranked.length) { tbody.innerHTML = '<tr><td colspan="4">No check-ins yet — be the first.</td></tr>'; return; }
+          if (!ranked.length) { tbody.innerHTML = '<tr><td colspan="4">No check-ins yet — be the first, via your agent.</td></tr>'; return; }
           tbody.innerHTML = ranked.map(function (r, i) {
-            return "<tr><td>" + (i + 1) + '</td><td class="mono">' + short(r[0]) + '</td><td class="num">' + r[1].streak + '</td><td class="num">' + r[1].total + "</td></tr>";
+            return "<tr><td>" + (i + 1) + '</td><td class="mono">' + short(r[0]) + '</td><td class="num">' + r[1].total + '</td><td class="num">' + r[1].streak + "</td></tr>";
           }).join("");
         } catch (e) {
           tbody.innerHTML = '<tr><td colspan="4">Couldn\'t load the leaderboard: ' + errText(e) + "</td></tr>";
         }
       }
 
-      async function refreshMyState() {
-        if (!account) return;
-        var c = getReadContract();
-        if (!c) return;
-        try {
-          var u = await c.getUser(account);
-          var today = await c.currentDay();
-          $("my-streak").textContent = u[1].toString();
-          $("my-total").textContent = u[2].toString();
-          checkedToday = u[0] === today && u[2] > 0n;
-          myLoaded = true;
-          if (!isHolder) $("checkin-note").textContent = "Wallet " + short(account) + " holds no Agent ID and can't check in. Switch to a wallet that holds one.";
-          else if (checkedToday) $("checkin-note").textContent = "You've already checked in today — come back tomorrow. The day rolls over at 00:00 UTC.";
-          else $("checkin-note").textContent = "This wallet holds an Agent ID — you can check in. Gas is only a few cents.";
-        } catch (e) {
-          $("checkin-note").textContent = "Couldn't read your check-in status: " + errText(e);
+      async function lookupStatus() {
+        var errEl = $("lookup-error");
+        var resEl = $("lookup-results");
+        var noteEl = $("lookup-note");
+        errEl.classList.add("hidden");
+        noteEl.classList.add("hidden");
+        var addr = $("addr-input").value.trim();
+        if (typeof ethers === "undefined") { $("no-lib").classList.remove("hidden"); return; }
+        if (!ethers.isAddress(addr)) {
+          errEl.textContent = "That doesn't look like a valid BSC address. Paste a full 0x… address and try again.";
+          errEl.classList.remove("hidden");
+          resEl.classList.add("hidden");
+          return;
         }
-        updateCheckinBtn();
-      }
-
-      function updateCheckinBtn() {
-        var btn = $("checkin-btn");
-        if (!account) { btn.disabled = true; btn.textContent = "Connect a wallet first"; return; }
-        if (!myLoaded) { btn.disabled = true; btn.textContent = "Reading your status…"; return; }
-        if (!isHolder) { btn.disabled = true; btn.textContent = "This wallet holds no Agent ID"; return; }
-        if (checkedToday) { btn.disabled = true; btn.textContent = "Checked in today ✓"; return; }
-        btn.disabled = false; btn.textContent = "Check in today";
-      }
-
-      async function doCheckIn() {
-        if (!signer) return;
-        var btn = $("checkin-btn");
-        btn.disabled = true; btn.textContent = "Waiting for you to confirm in the app…";
+        addr = ethers.getAddress(addr);
+        var btn = $("lookup-btn");
+        btn.disabled = true; btn.textContent = "Reading chain…";
         try {
-          var live = new ethers.Contract(CONTRACT, ABI, signer);
-          var tx = await live.checkIn();
-          $("tx-line").innerHTML = 'Transaction sent: <a href="https://bscscan.com/tx/' + tx.hash + '" target="_blank" rel="noopener">' + short(tx.hash) + "</a> — waiting for confirmation…";
-          $("checkin-note").textContent = "Transaction sent — waiting for on-chain confirmation…";
-          await tx.wait();
-          $("tx-line").innerHTML = 'Checked in ✓ <a href="https://bscscan.com/tx/' + tx.hash + '" target="_blank" rel="noopener">View this transaction on BscScan</a>';
-          $("checkin-note").textContent = "Checked in ✓";
-          await refreshMyState();
-          await refreshPublic();
+          var c = getReadContract();
+          var reg = new ethers.Contract(REGISTRY, REGISTRY_ABI, readProvider);
+          var results = await Promise.all([reg.balanceOf(addr), c.getUser(addr), c.currentDay()]);
+          var bal = results[0];
+          var u = results[1];
+          var today = Number(results[2]);
+          var lastDay = Number(u[0]);
+          var streak = Number(u[1]);
+          var total = Number(u[2]);
+          var holds = bal > 0n;
+          $("res-holder").textContent = holds ? "Yes" : "No";
+          $("res-streak").textContent = streak;
+          $("res-total").textContent = total;
+          if (total === 0 || lastDay === 0) {
+            $("res-lastday").textContent = "Never checked in";
+          } else {
+            var d = new Date(lastDay * 86400000);
+            $("res-lastday").textContent = d.toISOString().slice(0, 10) + (lastDay === today ? " (today)" : "");
+          }
+          resEl.classList.remove("hidden");
+          if (!holds) noteEl.textContent = "This address holds no Agent ID, so it can't check in. Agent IDs live on Binance Agentic Wallets — if this is a keyless or extension wallet address, that's expected.";
+          else if (total === 0) noteEl.textContent = "This address holds an Agent ID but hasn't checked in yet. Send your agent the prompt above to make the first check-in.";
+          else if (lastDay === today) noteEl.textContent = "Already checked in today. The next check-in opens at 00:00 UTC tomorrow.";
+          else if (lastDay === today - 1) noteEl.textContent = "Checked in yesterday — check in today to keep the streak going.";
+          else noteEl.textContent = "The streak has lapsed; the next check-in restarts it at 1.";
+          noteEl.classList.remove("hidden");
         } catch (e) {
-          $("checkin-note").textContent = "Check-in failed: " + errText(e);
-          btn.disabled = false; btn.textContent = "Check in today";
-          updateCheckinBtn();
+          errEl.textContent = "Couldn't read this address from the chain: " + errText(e);
+          errEl.classList.remove("hidden");
+          resEl.classList.add("hidden");
+        }
+        btn.disabled = false; btn.textContent = "Check status";
+      }
+
+      function copyPrompt() {
+        var text = $("agent-prompt").textContent.trim();
+        var msg = $("copy-msg");
+        function done() {
+          msg.classList.remove("hidden");
+          setTimeout(function () { msg.classList.add("hidden"); }, 3000);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(function () { fallback(); });
+        } else { fallback(); }
+        function fallback() {
+          var ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed"; ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand("copy"); done(); } catch (e) { /* text stays selectable in the box */ }
+          document.body.removeChild(ta);
         }
       }
 
       window.addEventListener("load", function () {
         if (typeof ethers === "undefined") { $("no-lib").classList.remove("hidden"); return; }
-        if (!getInjected()) {
-          setCheck("ck-wallet", "wait", "No wallet detected in this browser (one appears when you open this page in the Binance App's built-in browser).");
-        }
         refreshPublic();
       });
 
-      $("connect-btn").addEventListener("click", connect);
-      $("checkin-btn").addEventListener("click", doCheckIn);
-
-      var inj = getInjected();
-      if (inj && inj.on) {
-        inj.on("accountsChanged", function () { window.location.reload(); });
-        inj.on("chainChanged", function () { window.location.reload(); });
-      }
+      $("copy-btn").addEventListener("click", copyPrompt);
+      $("lookup-btn").addEventListener("click", lookupStatus);
+      $("addr-input").addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") { ev.preventDefault(); lookupStatus(); }
+      });
     </script>
   </body>
 </html>
