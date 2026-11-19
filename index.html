@@ -218,6 +218,7 @@
         </table>
         <div class="notice warn hidden" id="board-error">
           <p style="margin:0 0 10px">The leaderboard and total check-ins couldn't load: public BSC nodes are rate-limiting the event reads this page uses. The <strong>Total checkers</strong> number above comes from a simple contract call and is unaffected. Wait a moment, then try again.</p>
+          <p class="fine" id="board-error-detail" style="margin:0 0 10px"></p>
           <button class="btn-small" id="board-retry" type="button">Retry</button>
         </div>
       </section>
@@ -368,13 +369,18 @@ contract AgentCheckIn {
       var DEPLOY_BLOCK = 134570129;
       var REGISTRY = "0x60b9262456de011f7d15a54cdd8c48baaa8b022f";
       var RPCS = [
+        "https://bsc.drpc.org",
         "https://bsc-dataseed.binance.org/",
         "https://bsc-dataseed1.defibit.io/",
         "https://bsc-dataseed2.defibit.io/",
         "https://bsc-dataseed1.ninicoin.io/",
-        "https://1rpc.io/bnb",
-        "https://bsc.drpc.org"
+        "https://1rpc.io/bnb"
       ];
+      // Hard limits so a slow or rate-limiting node can never leave the
+      // leaderboard stuck on "Loading…": each node attempt gets at most
+      // 15 seconds, and the whole event scan gets a 45 second budget.
+      var ATTEMPT_TIMEOUT_MS = 15000;
+      var SCAN_BUDGET_MS = 45000;
       var BSC_RPC = RPCS[0];
       var ABI = [
         "event CheckIn(address indexed user, uint256 indexed day, uint256 streak)",
@@ -421,20 +427,24 @@ contract AgentCheckIn {
       // Returns a Map of address -> { total, streak } counted from the events
       // (scanning backwards, the first event seen per user carries its
       // current streak).
-      async function scanEvents(provider, expectedTotal) {
+      async function scanEvents(provider, expectedTotal, deadline) {
         var c = new ethers.Contract(CONTRACT, ABI, provider);
-        var latest = await withTimeout(provider.getBlockNumber(), 20000, "eth_blockNumber timed out");
+        function timeLeft() { return deadline - Date.now(); }
+        function budgetError() { return new Error("Leaderboard scan stopped: the 45-second scan budget ran out before the events came back."); }
+        if (timeLeft() <= 0) throw budgetError();
+        var latest = await withTimeout(provider.getBlockNumber(), Math.min(ATTEMPT_TIMEOUT_MS, timeLeft()), "eth_blockNumber timed out");
         var byUser = new Map();
         var MAX_CHUNK = 10000, MIN_CHUNK = 50;
         var chunk = MAX_CHUNK;
         var ceiling = MAX_CHUNK; // regrowth cap: half the smallest size that has failed on this node
         var end = latest;
         while (end >= DEPLOY_BLOCK) {
+          if (timeLeft() <= 0) throw budgetError();
           var start = Math.max(DEPLOY_BLOCK, end - chunk + 1);
           var events = null, lastErr = null, tries = 0;
           while (events === null) {
             try {
-              events = await withTimeout(c.queryFilter(c.filters.CheckIn(), start, end), 30000, "eth_getLogs timed out");
+              events = await withTimeout(c.queryFilter(c.filters.CheckIn(), start, end), Math.min(ATTEMPT_TIMEOUT_MS, Math.max(1000, timeLeft())), "eth_getLogs timed out");
             } catch (e) {
               lastErr = e;
               tries += 1;
@@ -468,13 +478,25 @@ contract AgentCheckIn {
       }
 
       // Try each public BSC node in turn, retrying a node once before moving
-      // on to the next, until one of them returns the events.
+      // on to the next, until one of them returns the events. Every attempt
+      // is raced against a hard 15-second timeout, and the whole scan shares
+      // one 45-second budget: once the budget is gone the scan stops and the
+      // caller shows the error with a Retry button instead of loading forever.
       async function fetchCheckers(expectedTotal) {
+        var deadline = Date.now() + SCAN_BUDGET_MS;
         var lastErr = null;
         for (var r = 0; r < RPCS.length; r++) {
           for (var attempt = 0; attempt < 2; attempt++) {
+            var remaining = deadline - Date.now();
+            if (remaining <= 0) {
+              throw lastErr || new Error("Leaderboard scan stopped: the 45-second scan budget ran out before the events came back.");
+            }
             try {
-              return await scanEvents(makeProvider(RPCS[r]), expectedTotal);
+              return await withTimeout(
+                scanEvents(makeProvider(RPCS[r]), expectedTotal, deadline),
+                Math.min(ATTEMPT_TIMEOUT_MS, remaining),
+                "Node " + RPCS[r] + " did not answer within 15 seconds"
+              );
             } catch (e) {
               lastErr = e;
               if (attempt === 0) await sleep(800);
@@ -492,7 +514,7 @@ contract AgentCheckIn {
         var c = getReadContract();
         if (c) {
           try {
-            expectedTotal = Number(await c.totalCheckers());
+            expectedTotal = Number(await withTimeout(c.totalCheckers(), 10000, "totalCheckers() timed out"));
             $("total-checkers").textContent = expectedTotal;
           } catch (e) { /* plain contract call; if it fails, the event scan below still runs without the early-stop hint */ }
         }
@@ -501,6 +523,7 @@ contract AgentCheckIn {
           await renderBoard(byUser);
         } catch (e) {
           $("board").innerHTML = '<tr><td colspan="4">Couldn\'t load the leaderboard.</td></tr>';
+          $("board-error-detail").textContent = "Last error: " + errText(e);
           $("board-error").classList.remove("hidden");
         }
       }
@@ -518,7 +541,7 @@ contract AgentCheckIn {
           var addr = entry[0], ev = entry[1];
           if (c) {
             try {
-              var u = await c.getUser(addr);
+              var u = await withTimeout(c.getUser(addr), 10000, "getUser timed out");
               return { addr: addr, total: Number(u[2]), streak: Number(u[1]) };
             } catch (e) { /* fall through to the event-derived numbers */ }
           }
