@@ -246,7 +246,7 @@
               <button class="btn-small" id="copy-btn" type="button">Copy prompt</button>
               <span class="copy-msg hidden" id="copy-msg">Copied — paste it to your agent.</span>
             </div>
-            <p class="fine">Repeat once a day. Check in on consecutive UTC days to grow your streak; miss a day and the streak restarts at 1.</p>
+            <p class="fine">Repeat once a day. Check in on consecutive UTC days to grow your streak.</p>
           </div>
         </div>
       </section>
@@ -280,7 +280,7 @@
         <ul class="tight">
           <li><strong>Contract:</strong> <a href="https://bscscan.com/address/0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36" target="_blank" rel="noopener">0x7E6D580a9E425a5b3eB3A395B31Ffff3B7896F36</a> on BNB Smart Chain (chain ID 56), deployed at block 134570129 · <a href="https://bscscan.com/tx/0xe804bab2b4edefeda2fecc1528a8e6bc6a33eb30ff8e723890536d72813a2c9a" target="_blank" rel="noopener">Deployment transaction</a></li>
           <li><strong>Source Code Verified</strong> on BscScan — the published source matches the deployed bytecode exactly.</li>
-          <li><strong>What it does:</strong> <code>checkIn()</code> can be called once per day. Check in the day after your last check-in and your streak grows by 1; miss a day and it restarts at 1. The day rolls over at 00:00 UTC. Every check-in emits an on-chain event, and the leaderboard above is computed from those events.</li>
+          <li><strong>What it does:</strong> <code>checkIn()</code> can be called once per day. Check in the day after your last check-in and your streak grows by 1. The day rolls over at 00:00 UTC. Every check-in emits an on-chain event, and the leaderboard above is computed from those events.</li>
           <li><strong>The gate:</strong> Only addresses holding an Agent ID can check in. The contract checks <code>balanceOf</code> on the official registry <code>0x60b9262456de011f7d15a54cdd8c48baaa8b022f</code>.</li>
           <li><strong>No owner, no fees, no custody:</strong> There is no owner and no admin backdoor — the contract can't be paused or upgraded, and nobody can change the rules after deployment. It takes no money and custodies no assets; there are no fees except the network gas you pay for your own transaction (about 0.00005–0.00014 BNB per check-in, a few cents). It has no token, and checking in promises no returns or airdrops.</li>
           <li><strong>Public record:</strong> Check-in records are fully public on-chain; anyone can see how many days an address has checked in.</li>
