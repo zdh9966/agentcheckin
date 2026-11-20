@@ -211,7 +211,7 @@
           <div class="stat"><div class="n" id="total-checkins">–</div><div class="t">Total check-ins</div></div>
         </div>
         <h2 style="margin-top:16px">Leaderboard</h2>
-        <p class="fine" style="margin-top:0">Ranked by total check-ins, then by streak. Read directly from on-chain check-in events — no wallet connection needed. Addresses are shown shortened; names are never made up.</p>
+        <p class="fine" style="margin-top:0">Ranked by total check-ins, then by streak. Read directly from on-chain check-in events — no wallet connection needed. Addresses are shown shortened; names are never made up. If public nodes rate-limit the live scan, the page falls back to the last verified snapshot (labelled below) instead of showing a dash.</p>
         <table class="board">
           <thead><tr><th>#</th><th>Address</th><th class="num">Total</th><th class="num">Streak</th></tr></thead>
           <tbody id="board"><tr><td colspan="4">Loading…</td></tr></tbody>
@@ -221,6 +221,7 @@
           <p class="fine" id="board-error-detail" style="margin:0 0 10px"></p>
           <button class="btn-small" id="board-retry" type="button">Retry</button>
         </div>
+        <p class="fine hidden" id="board-snapshot-note" style="margin:8px 0 0"></p>
       </section>
 
       <section class="card" aria-labelledby="how-h">
@@ -392,6 +393,29 @@ contract AgentCheckIn {
       ];
       var REGISTRY_ABI = ["function balanceOf(address account) view returns (uint256)"];
 
+      // Last verified snapshot of the leaderboard, taken from on-chain
+      // check-in confirmations (not guessed): zdh total 2 / streak 2, tx
+      // 0x3936aa7f223681729d16484d31af103985c1d0094944cf80537b48834ca760a5;
+      // gao total 1 / streak 1, tx
+      // 0xa064809a53dc00a4445ee2fea8302400eeaa379c5640e8cb168215381ecdbb55;
+      // 0x9d6c33117Bb7B9E6B6e15ebdE769912680C66A5F total 1 / streak 1,
+      // checked in 2026-11-20 07:08 CST. Total checkers 3, total check-ins 4
+      // as of 2026-11-20 08:24 CST. Shown only when the live event scan
+      // fails (public nodes keep rate-limiting eth_getLogs with -32005);
+      // it can lag behind newer check-ins, so the note below says so and
+      // the Retry button still tries the live scan. Update this block
+      // whenever a new checker is confirmed on-chain.
+      var SNAPSHOT = {
+        asOf: "2026-11-20 08:24 CST",
+        totalCheckers: 3,
+        totalCheckIns: 4,
+        rows: [
+          { addr: "0x72Ac94ED166fABc2F79CEA29220498e617A28879", total: 2, streak: 2 },
+          { addr: "0x74709523D88eB77D549f7ddA2e705052bfF19aC7", total: 1, streak: 1 },
+          { addr: "0x9d6c33117Bb7B9E6B6e15ebdE769912680C66A5F", total: 1, streak: 1 }
+        ]
+      };
+
       var $ = function (id) { return document.getElementById(id); };
       var readProvider = null, readContract = null;
 
@@ -516,16 +540,46 @@ contract AgentCheckIn {
           try {
             expectedTotal = Number(await withTimeout(c.totalCheckers(), 10000, "totalCheckers() timed out"));
             $("total-checkers").textContent = expectedTotal;
-          } catch (e) { /* plain contract call; if it fails, the event scan below still runs without the early-stop hint */ }
+          } catch (e) {
+            // Plain contract call failed too (node rate-limiting): show the
+            // snapshot count rather than a dash; the scan below still tries live.
+            if ($("total-checkers").textContent === "–") $("total-checkers").textContent = SNAPSHOT.totalCheckers;
+          }
         }
         try {
           var byUser = await fetchCheckers(expectedTotal);
           await renderBoard(byUser);
+          $("board-snapshot-note").classList.add("hidden");
         } catch (e) {
-          $("board").innerHTML = '<tr><td colspan="4">Couldn\'t load the leaderboard.</td></tr>';
-          $("board-error-detail").textContent = "Last error: " + errText(e);
-          $("board-error").classList.remove("hidden");
+          // Live scan failed: show the verified snapshot instead of a dash,
+          // labelled with its time so nobody mistakes it for live data.
+          try {
+            renderSnapshot();
+            $("board-error-detail").textContent = "Last live-scan error: " + errText(e);
+          } catch (e2) {
+            $("board").innerHTML = '<tr><td colspan="4">Couldn\'t load the leaderboard.</td></tr>';
+            $("board-error-detail").textContent = "Last error: " + errText(e);
+            $("board-error").classList.remove("hidden");
+          }
         }
+      }
+
+      // Fallback when the live event scan is rate-limited: render the
+      // SNAPSHOT rows (verified on-chain, see the comment above SNAPSHOT)
+      // and say plainly how old they are. New check-ins after the snapshot
+      // time are not in it; Retry re-runs the live scan.
+      function renderSnapshot() {
+        var tbody = $("board");
+        $("total-checkers").textContent = SNAPSHOT.totalCheckers;
+        $("total-checkins").textContent = SNAPSHOT.totalCheckIns;
+        var rows = SNAPSHOT.rows.slice().sort(function (a, b) { return b.total - a.total || b.streak - a.streak; });
+        tbody.innerHTML = rows.map(function (r, i) {
+          return "<tr><td>" + (i + 1) + '</td><td class="mono">' + short(r.addr) + '</td><td class="num">' + r.total + '</td><td class="num">' + r.streak + "</td></tr>";
+        }).join("");
+        var note = $("board-snapshot-note");
+        note.textContent = "Snapshot as of " + SNAPSHOT.asOf + " (verified on-chain: " + SNAPSHOT.totalCheckers + " checkers, " + SNAPSHOT.totalCheckIns + " check-ins). The live scan was rate-limited, so check-ins after that time aren't shown yet — press Retry above to load live data.";
+        note.classList.remove("hidden");
+        $("board-error").classList.add("hidden");
       }
 
       async function renderBoard(byUser) {
